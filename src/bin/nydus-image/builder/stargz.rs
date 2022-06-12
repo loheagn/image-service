@@ -26,6 +26,7 @@ use storage::device::BlobChunkFlags;
 use storage::meta::BlobMetaHeaderOndisk;
 
 use crate::builder::Builder;
+use crate::core::blob::Blob;
 use crate::core::bootstrap::Bootstrap;
 use crate::core::context::{
     BlobContext, BlobManager, BootstrapContext, BootstrapManager, BuildContext, BuildOutput,
@@ -583,6 +584,7 @@ impl StargzBuilder {
         &mut self,
         ctx: &mut BuildContext,
         bootstrap_ctx: &mut BootstrapContext,
+        blob_ctx: &mut BlobContext,
         blob_mgr: &mut BlobManager,
     ) -> Result<()> {
         let mut decompressed_blob_size = 0u64;
@@ -592,12 +594,6 @@ impl StargzBuilder {
         let mut header = BlobMetaHeaderOndisk::default();
         header.set_4k_aligned(true);
 
-        let mut blob_ctx = BlobContext::new(
-            ctx.blob_id.clone(),
-            ctx.blob_storage.clone(),
-            0,
-            ctx.inline_bootstrap,
-        )?;
         blob_ctx.set_chunk_dict(blob_mgr.get_chunk_dict());
         blob_ctx.set_chunk_size(ctx.chunk_size);
         blob_ctx.set_meta_info_enabled(ctx.fs_version == RafsVersion::V6);
@@ -614,14 +610,15 @@ impl StargzBuilder {
             let mut inode_hasher = RafsDigest::hasher(digest::Algorithm::Sha256);
 
             for chunk in node.chunks.iter_mut() {
+                chunk.inner.set_blob_index(blob_index);
                 if let Some(chunk_index) = chunk_map.get(chunk.inner.id()) {
                     chunk.inner.set_index(*chunk_index);
                 } else {
                     let chunk_index = blob_ctx.alloc_index()?;
                     chunk.inner.set_index(chunk_index);
                     chunk_map.insert(*chunk.inner.id(), chunk.inner.index());
+                    blob_ctx.add_chunk_meta_info(&chunk.inner)?;
                 }
-                chunk.inner.set_blob_index(blob_index);
                 decompressed_blob_size += chunk.inner.uncompressed_size() as u64;
                 compressed_blob_size += chunk.inner.compressed_size() as u64;
                 inode_hasher.digest_update(chunk.inner.id().as_ref());
@@ -640,9 +637,6 @@ impl StargzBuilder {
 
         blob_ctx.decompressed_blob_size = decompressed_blob_size;
         blob_ctx.compressed_blob_size = compressed_blob_size;
-        if blob_ctx.decompressed_blob_size > 0 {
-            blob_mgr.add(blob_ctx);
-        }
 
         Ok(())
     }
@@ -684,13 +678,25 @@ impl Builder for StargzBuilder {
         )?;
 
         // Generate node chunks and digest
-        self.generate_nodes(ctx, &mut bootstrap_ctx, blob_mgr)?;
+        let mut blob_ctx = BlobContext::new(
+            ctx.blob_id.clone(),
+            ctx.blob_storage.clone(),
+            0,
+            ctx.inline_bootstrap,
+        )?;
+        self.generate_nodes(ctx, &mut bootstrap_ctx, &mut blob_ctx, blob_mgr)?;
+
+        // Dump blob meta
+        Blob::dump_meta_data(ctx, &mut blob_ctx)?;
+        if blob_ctx.decompressed_blob_size > 0 {
+            blob_mgr.add(blob_ctx);
+        }
 
         // Dump bootstrap file
         let blob_table = blob_mgr.to_blob_table(ctx)?;
         bootstrap.dump(ctx, &mut bootstrap_ctx, &blob_table)?;
-
         bootstrap_mgr.add(bootstrap_ctx);
+
         BuildOutput::new(blob_mgr, bootstrap_mgr)
     }
 }
