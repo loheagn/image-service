@@ -298,7 +298,7 @@ impl TocIndex {
     fn load(path: &Path) -> Result<TocIndex> {
         let index_file = File::open(path)
             .with_context(|| format!("failed to open stargz index file {:?}", path))?;
-        let toc_index: TocIndex = serde_json::from_reader(index_file)
+        let mut toc_index: TocIndex = serde_json::from_reader(index_file)
             .with_context(|| format!("invalid stargz index file {:?}", path))?;
 
         if toc_index.version != 1 {
@@ -306,6 +306,14 @@ impl TocIndex {
                 "unsupported index version {}",
                 toc_index.version
             )));
+        }
+
+        // Append root directory entry if not exists.
+        if toc_index.entries.len() > 0 && toc_index.entries[0].name()? != PathBuf::from("/") {
+            let mut root_entry = TocEntry::default();
+            root_entry.name = PathBuf::from("");
+            root_entry.toc_type = String::from("dir");
+            toc_index.entries.insert(0, root_entry);
         }
 
         Ok(toc_index)
