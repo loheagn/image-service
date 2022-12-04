@@ -200,7 +200,7 @@ func testConvertWithS3Backend(t *testing.T, fsVersion string) {
 }
 
 func TestSmoke(t *testing.T) {
-	fsVersions := [2]string{"5", "6"}
+	fsVersions := []string{"5"}
 	for _, v := range fsVersions {
 		testBasicAuth(t, v)
 		testBasicConvert(t, v)
