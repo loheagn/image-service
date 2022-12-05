@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/dragonflyoss/image-service/contrib/nydusify/pkg/checker"
@@ -148,6 +149,8 @@ func (nydusify *Nydusify) Convert(t *testing.T) {
 
 func (nydusify *Nydusify) Check(t *testing.T) {
 	host := nydusify.Registry.Host()
+	logrus.Warnf("loheagn nydusify backendType: %s", nydusify.backendType)
+	logrus.Warnf("loheagn nydusify backendConfig: %s", nydusify.backendConfig)
 	checker, err := checker.New(checker.Opt{
 		WorkDir:        filepath.Join(nydusify.workDir, nydusify.Target),
 		Source:         host + "/" + nydusify.Source,
@@ -157,6 +160,8 @@ func (nydusify *Nydusify) Check(t *testing.T) {
 		NydusImagePath: nydusImagePath,
 		NydusdPath:     nydusdPath,
 		ExpectedArch:   "amd64",
+		BackendType:    nydusify.backendType,
+		BackendConfig:  nydusify.backendConfig,
 	})
 	assert.Nil(t, err)
 
