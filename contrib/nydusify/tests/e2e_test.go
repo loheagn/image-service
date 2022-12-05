@@ -197,7 +197,7 @@ func testConvertWithS3Backend(t *testing.T, fsVersion string) {
 	nydusify := NewNydusify(registry, "image-basic", "image-basic-nydus", "", "", fsVersion)
 	nydusify.Convert(t)
 	// TODO nydusd doesn't support s3 backend for now, skip the checker
-	// nydusify.Check(t)
+	nydusify.Check(t)
 }
 
 func TestSmoke(t *testing.T) {
