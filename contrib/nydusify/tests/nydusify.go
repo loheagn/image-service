@@ -52,12 +52,8 @@ func buildRegistryBackendConfig(registry *Registry, repo string) string {
 	config["host"] = registry.host
 	config["repo"] = repo
 	config["scheme"] = "http"
-	if registry.authFile != "" {
-		authBytes, err := os.ReadFile(registry.authFile)
-		if err != nil {
-			logrus.Errorf("failed to read auth file: %v", err)
-		}
-		config["auth"] = string(authBytes)
+	if registry.authString != "" {
+		config["auth"] = registry.authString
 	}
 	configBytes, _ := json.Marshal(config)
 	return string(configBytes)
