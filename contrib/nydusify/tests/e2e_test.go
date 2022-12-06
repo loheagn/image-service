@@ -40,6 +40,9 @@ func testBasicAuth(t *testing.T, fsVersion string) {
 }
 
 func testReproducableBuild(t *testing.T, fsVersion string) {
+	logrus.Warnf("loheagn backend type: %s", os.Getenv("BACKEND_TYPE"))
+	logrus.Warnf("loheagn backend config: %s", os.Getenv("BACKEND_CONFIG"))
+
 	registry := NewRegistry(t)
 	registry.Build(t, "image-basic")
 	defer registry.Destroy(t)
@@ -202,11 +205,11 @@ func testConvertWithS3Backend(t *testing.T, fsVersion string) {
 func TestSmoke(t *testing.T) {
 	fsVersions := [2]string{"5", "6"}
 	for _, v := range fsVersions {
-		// testBasicConvert(t, v)
-		// testBasicAuth(t, v)
+		testBasicConvert(t, v)
+		testBasicAuth(t, v)
 		testReproducableBuild(t, v)
-		// testConvertWithCache(t, v)
-		// testConvertWithChunkDict(t, v)
-		// testConvertWithS3Backend(t, v)
+		testConvertWithCache(t, v)
+		testConvertWithChunkDict(t, v)
+		testConvertWithS3Backend(t, v)
 	}
 }
