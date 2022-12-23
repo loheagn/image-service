@@ -47,6 +47,7 @@ backend-localfs = []
 backend-oss = ["base64", "httpdate", "hmac-sha1-compact", "reqwest", "url"]
 backend-registry = ["base64", "reqwest", "url"]
 backend-s3 = ["base64", "hmac", "http", "reqwest", "sha2", "time", "url"]
+backend-content-store-proxy = []
 
 [package.metadata.docs.rs]
 all-features = true

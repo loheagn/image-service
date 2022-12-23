@@ -31,6 +31,8 @@ use crate::StorageError;
     feature = "backend-s3"
 ))]
 pub mod connection;
+#[cfg(feature = "backend-content-store-proxy")]
+pub mod content_store_proxy;
 #[cfg(feature = "backend-localfs")]
 pub mod localfs;
 #[cfg(any(feature = "backend-oss", feature = "backend-s3"))]
@@ -58,6 +60,9 @@ pub enum BackendError {
     #[cfg(any(feature = "backend-oss", feature = "backend-s3"))]
     /// Error from object storage backend.
     ObjectStorage(self::object_storage::ObjectStorageError),
+    #[cfg(feature = "backend-content-store-proxy")]
+    /// Error from content store proxy storage backend.
+    ContentStoreProxy(self::content_store_proxy::ContentStoreProxyError),
 }
 
 /// Specialized `Result` for storage backends.

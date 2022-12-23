@@ -481,6 +481,13 @@ fn prepare_cmd_args(bti_string: &'static str) -> App {
                 .required(false),
                 )
             .arg(
+                Arg::new("cs-proxy-socket")
+                .long("cs-proxy-socket")
+                .short('P')
+                .help("path to cs-proxy socket")
+                .required(false),
+            )
+            .arg(
                 Arg::new("output")
                 .long("output")
                 .help("path for output tar file")
@@ -877,9 +884,12 @@ impl Command {
         }
 
         let blob = args.get_one::<String>("blob").map(|s| s.as_str());
+        let cs_proxy_socket = args
+            .get_one::<String>("cs-proxy-socket")
+            .map(|s| s.as_str());
 
-        let unpacker =
-            OCIUnpacker::new(bootstrap, blob, output).with_context(|| "fail to create unpacker")?;
+        let unpacker = OCIUnpacker::new(bootstrap, blob, cs_proxy_socket, output)
+            .with_context(|| "fail to create unpacker")?;
 
         unpacker.unpack().with_context(|| "fail to unpack")
     }

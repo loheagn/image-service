@@ -15,6 +15,7 @@ use nydus_rafs::{
     metadata::{RafsInodeExt, RafsMode, RafsSuper},
     RafsIoReader, RafsIterator,
 };
+use nydus_storage::backend::content_store_proxy::{ContentStoreProxy, CsProxyContentType};
 use nydus_storage::{
     backend::{localfs::LocalFs, BlobBackend, BlobReader},
     device::BlobInfo,
@@ -37,22 +38,30 @@ pub trait Unpacker {
 pub struct OCIUnpacker {
     bootstrap: PathBuf,
     blob: Option<PathBuf>,
+    cs_proxy_socket: Option<PathBuf>,
     output: PathBuf,
 
     builder_factory: OCITarBuilderFactory,
 }
 
 impl OCIUnpacker {
-    pub fn new(bootstrap: &str, blob: Option<&str>, output: &str) -> Result<Self> {
+    pub fn new(
+        bootstrap: &str,
+        blob: Option<&str>,
+        cs_proxy_socket: Option<&str>,
+        output: &str,
+    ) -> Result<Self> {
         let bootstrap = PathBuf::from(bootstrap);
         let output = PathBuf::from(output);
         let blob = blob.map(PathBuf::from);
+        let cs_proxy_socket = cs_proxy_socket.map(PathBuf::from);
 
         let builder_factory = OCITarBuilderFactory::new();
 
         Ok(OCIUnpacker {
             builder_factory,
             bootstrap,
+            cs_proxy_socket,
             blob,
             output,
         })
@@ -87,9 +96,12 @@ impl Unpacker for OCIUnpacker {
 
         let rafs = self.load_rafs()?;
 
-        let mut builder = self
-            .builder_factory
-            .create(&rafs, self.blob.as_deref(), &self.output)?;
+        let mut builder = self.builder_factory.create(
+            &rafs,
+            self.blob.as_deref(),
+            self.cs_proxy_socket.as_deref(),
+            &self.output,
+        )?;
 
         for (node, path) in RafsIterator::new(&rafs) {
             builder.append(&*node, &path)?;
@@ -124,12 +136,13 @@ impl OCITarBuilderFactory {
         &self,
         meta: &RafsSuper,
         blob_path: Option<&Path>,
+        cs_proxy_socket: Option<&Path>,
         output_path: &Path,
     ) -> Result<Box<dyn TarBuilder>> {
         let writer = self.create_writer(output_path)?;
 
         let blob = meta.superblock.get_blob_infos().pop();
-        let builders = self.create_builders(blob, blob_path)?;
+        let builders = self.create_builders(blob, blob_path, cs_proxy_socket)?;
 
         let builder = OCITarBuilder::new(builders, writer);
 
@@ -154,6 +167,7 @@ impl OCITarBuilderFactory {
         &self,
         blob: Option<Arc<BlobInfo>>,
         blob_path: Option<&Path>,
+        cs_proxy_socket: Option<&Path>,
     ) -> Result<Vec<Box<dyn SectionBuilder>>> {
         // PAX basic builders
         let ext_builder = Rc::new(PAXExtensionSectionBuilder::new());
@@ -168,7 +182,7 @@ impl OCITarBuilderFactory {
         let fifo_builder = OCIFifoBuilder::new(special_builder.clone());
         let char_builder = OCICharBuilder::new(special_builder.clone());
         let block_builder = OCIBlockBuilder::new(special_builder);
-        let reg_builder = self.create_reg_builder(blob, blob_path)?;
+        let reg_builder = self.create_reg_builder(blob, blob_path, cs_proxy_socket)?;
 
         // The order counts.
         let builders = vec![
@@ -189,15 +203,16 @@ impl OCITarBuilderFactory {
         &self,
         blob: Option<Arc<BlobInfo>>,
         blob_path: Option<&Path>,
+        cs_proxy_socket: Option<&Path>,
     ) -> Result<OCIRegBuilder> {
         let (reader, compressor) = match blob {
             None => (None, None),
             Some(ref blob) => {
-                if blob_path.is_none() {
-                    bail!("miss blob path")
+                if cs_proxy_socket.is_none() && blob_path.is_none() {
+                    bail!("blob path or cs proxy socket must be provided")
                 }
 
-                let reader = self.create_blob_reader(blob_path.unwrap())?;
+                let reader = self.create_blob_reader(blob_path, cs_proxy_socket)?;
                 let compressor = blob.compressor();
 
                 (Some(reader), Some(compressor))
@@ -211,21 +226,42 @@ impl OCITarBuilderFactory {
         ))
     }
 
-    fn create_blob_reader(&self, blob_path: &Path) -> Result<Arc<dyn BlobReader>> {
-        let config = LocalFsConfig {
-            blob_file: blob_path.to_str().unwrap().to_owned(),
-            dir: Default::default(),
-            alt_dirs: Default::default(),
-        };
+    fn create_blob_reader(
+        &self,
+        blob_path: Option<&Path>,
+        cs_proxy_socket: Option<&Path>,
+    ) -> Result<Arc<dyn BlobReader>> {
+        let id = Some("unpacker");
 
-        let backend = LocalFs::new(&config, Some("unpacker"))
-            .with_context(|| format!("fail to create local backend for {:?}", blob_path))?;
-
-        let reader = backend
-            .get_reader("")
-            .map_err(|err| anyhow!("fail to get reader, error {:?}", err))?;
-
-        Ok(reader)
+        match cs_proxy_socket {
+            Some(socket) => {
+                ContentStoreProxy::new(socket.to_str().unwrap(), CsProxyContentType::RawBlob, id)
+                    .with_context(|| {
+                        format!("fail to create cs proxy backend for {:?}", cs_proxy_socket)
+                    })
+                    .map(|proxy| Box::new(proxy) as Box<dyn BlobBackend>)
+            }
+            None => match blob_path {
+                Some(path) => {
+                    let config = LocalFsConfig {
+                        blob_file: path.to_str().unwrap().to_owned(),
+                        dir: Default::default(),
+                        alt_dirs: Default::default(),
+                    };
+                    LocalFs::new(&config, id)
+                        .with_context(|| {
+                            format!("fail to create local backend for {:?}", blob_path)
+                        })
+                        .map(|local| Box::new(local) as Box<dyn BlobBackend>)
+                }
+                None => return Err(anyhow!("miss blob path")),
+            },
+        }
+        .and_then(|backend| {
+            backend
+                .get_reader("")
+                .map_err(|err| anyhow!("fail to get reader, error {:?}", err))
+        })
     }
 }
 
