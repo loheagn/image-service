@@ -15,6 +15,7 @@ use nydus_rafs::{
     metadata::{RafsInodeExt, RafsSuper},
     RafsIterator,
 };
+use nydus_storage::factory;
 use nydus_storage::{
     backend::{localfs::LocalFs, BlobBackend, BlobReader},
     device::BlobInfo,
@@ -76,11 +77,11 @@ impl Unpacker for OCIUnpacker {
             self.bootstrap, self.blob, self.output
         );
 
-        let rafs = self.load_rafs(config)?;
+        let rafs = self.load_rafs(config.clone())?;
 
-        let mut builder = self
-            .builder_factory
-            .create(&rafs, self.blob.as_deref(), &self.output)?;
+        let mut builder =
+            self.builder_factory
+                .create(&rafs, self.blob.as_deref(), config, &self.output)?;
 
         for (node, path) in RafsIterator::new(&rafs) {
             builder.append(&*node, &path)?;
@@ -115,12 +116,13 @@ impl OCITarBuilderFactory {
         &self,
         meta: &RafsSuper,
         blob_path: Option<&Path>,
+        config: Arc<ConfigV2>,
         output_path: &Path,
     ) -> Result<Box<dyn TarBuilder>> {
         let writer = self.create_writer(output_path)?;
 
         let blob = meta.superblock.get_blob_infos().pop();
-        let builders = self.create_builders(blob, blob_path)?;
+        let builders = self.create_builders(blob, blob_path, config)?;
 
         let builder = OCITarBuilder::new(builders, writer);
 
@@ -145,6 +147,7 @@ impl OCITarBuilderFactory {
         &self,
         blob: Option<Arc<BlobInfo>>,
         blob_path: Option<&Path>,
+        config: Arc<ConfigV2>,
     ) -> Result<Vec<Box<dyn SectionBuilder>>> {
         // PAX basic builders
         let ext_builder = Rc::new(PAXExtensionSectionBuilder::new());
@@ -159,7 +162,7 @@ impl OCITarBuilderFactory {
         let fifo_builder = OCIFifoBuilder::new(special_builder.clone());
         let char_builder = OCICharBuilder::new(special_builder.clone());
         let block_builder = OCIBlockBuilder::new(special_builder);
-        let reg_builder = self.create_reg_builder(blob, blob_path)?;
+        let reg_builder = self.create_reg_builder(blob, blob_path, config)?;
 
         // The order counts.
         let builders = vec![
@@ -180,15 +183,12 @@ impl OCITarBuilderFactory {
         &self,
         blob: Option<Arc<BlobInfo>>,
         blob_path: Option<&Path>,
+        config: Arc<ConfigV2>,
     ) -> Result<OCIRegBuilder> {
         let (reader, compressor) = match blob {
             None => (None, None),
             Some(ref blob) => {
-                if blob_path.is_none() {
-                    bail!("miss blob path")
-                }
-
-                let reader = self.create_blob_reader(blob_path.unwrap())?;
+                let reader = self.create_blob_reader(blob_path, config)?;
                 let compressor = blob.compressor();
 
                 (Some(reader), Some(compressor))
@@ -202,19 +202,31 @@ impl OCITarBuilderFactory {
         ))
     }
 
-    fn create_blob_reader(&self, blob_path: &Path) -> Result<Arc<dyn BlobReader>> {
-        let config = LocalFsConfig {
-            blob_file: blob_path.to_str().unwrap().to_owned(),
-            dir: Default::default(),
-            alt_dirs: Default::default(),
-        };
+    fn create_blob_reader(
+        &self,
+        blob_path: Option<&Path>,
+        config: Arc<ConfigV2>,
+    ) -> Result<Arc<dyn BlobReader>> {
+        let reader = match config.backend {
+            Some(ref backend_config) => {
+                factory::BlobFactory::new_backend(backend_config, "unpacker")
+                    .with_context(|| "fail to create blob backend from backend config")?
+                    .get_reader("")
+            }
+            None => {
+                let blob_path = blob_path.ok_or_else(|| anyhow!("blob path is not specified"))?;
+                let config = LocalFsConfig {
+                    blob_file: blob_path.to_str().unwrap().to_owned(),
+                    dir: Default::default(),
+                    alt_dirs: Default::default(),
+                };
 
-        let backend = LocalFs::new(&config, Some("unpacker"))
-            .with_context(|| format!("fail to create local backend for {:?}", blob_path))?;
-
-        let reader = backend
-            .get_reader("")
-            .map_err(|err| anyhow!("fail to get reader, error {:?}", err))?;
+                LocalFs::new(&config, Some("unpacker"))
+                    .with_context(|| format!("fail to create local backend for {:?}", blob_path))?
+                    .get_reader("")
+            }
+        }
+        .map_err(|err| anyhow!("fail to get reader, error {:?}", err))?;
 
         Ok(reader)
     }
