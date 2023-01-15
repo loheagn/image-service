@@ -238,6 +238,8 @@ pub struct BackendConfigV2 {
     pub s3: Option<S3Config>,
     /// Configuration for container registry backend.
     pub registry: Option<RegistryConfig>,
+    /// Configuration for local http proxy.
+    pub local_http_proxy: Option<LocalHttpProxyConfig>,
 }
 
 impl BackendConfigV2 {
@@ -276,6 +278,7 @@ impl BackendConfigV2 {
                 }
                 None => return false,
             },
+
             _ => return false,
         }
 
@@ -323,6 +326,17 @@ impl BackendConfigV2 {
             self.registry
                 .as_ref()
                 .ok_or_else(|| einval!("no configuration information for registry"))
+        }
+    }
+
+    /// Get configuration information for local http proxy
+    pub fn get_local_http_proxy_config(&self) -> Result<&LocalHttpProxyConfig> {
+        if &self.backend_type != "local-http-proxy" {
+            Err(einval!("backend type is not 'local-http-proxy'"))
+        } else {
+            self.local_http_proxy
+                .as_ref()
+                .ok_or_else(|| einval!("no configuration information for local-http-proxy"))
         }
     }
 }
@@ -425,6 +439,14 @@ pub struct S3Config {
     /// Enable mirrors for the read request.
     #[serde(default)]
     pub mirrors: Vec<MirrorConfig>,
+}
+
+/// ContentProxyProxy configuration information to access blobs.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LocalHttpProxyConfig {
+    pub socket_path: String,
+    #[serde(default = "default_local_http_proxy_thread_num")]
+    pub thread_num: usize,
 }
 
 /// Container registry configuration information to access blobs.
@@ -878,6 +900,10 @@ fn default_rafs_mode() -> String {
     "direct".to_string()
 }
 
+fn default_local_http_proxy_thread_num() -> usize {
+    1
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // For backward compatibility
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -904,6 +930,7 @@ impl TryFrom<&BackendConfig> for BackendConfigV2 {
             oss: None,
             s3: None,
             registry: None,
+            local_http_proxy: None,
         };
 
         match value.backend_type.as_str() {

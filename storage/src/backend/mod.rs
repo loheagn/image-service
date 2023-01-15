@@ -32,6 +32,8 @@ use crate::StorageError;
     feature = "backend-s3"
 ))]
 pub mod connection;
+#[cfg(feature = "backend-local-http-proxy")]
+pub mod local_http_proxy;
 #[cfg(feature = "backend-localfs")]
 pub mod localfs;
 #[cfg(any(feature = "backend-oss", feature = "backend-s3"))]
@@ -59,6 +61,9 @@ pub enum BackendError {
     #[cfg(any(feature = "backend-oss", feature = "backend-s3"))]
     /// Error from object storage backend.
     ObjectStorage(self::object_storage::ObjectStorageError),
+    #[cfg(feature = "backend-local-http-proxy")]
+    /// Error from local http proxy backend.
+    LocalHttpProxy(self::local_http_proxy::LocalHttpProxyError),
 }
 
 impl fmt::Display for BackendError {
@@ -72,6 +77,8 @@ impl fmt::Display for BackendError {
             BackendError::LocalFs(e) => write!(f, "{}", e),
             #[cfg(any(feature = "backend-oss", feature = "backend-s3"))]
             BackendError::ObjectStorage(e) => write!(f, "{}", e),
+            #[cfg(feature = "backend-local-http-proxy")]
+            BackendError::LocalHttpProxy(e) => write!(f, "{}", e),
         }
     }
 }

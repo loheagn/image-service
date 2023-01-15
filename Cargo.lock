@@ -1106,6 +1106,8 @@ dependencies = [
  "hmac-sha1-compact",
  "http",
  "httpdate",
+ "hyper",
+ "hyperlocal",
  "lazy_static",
  "leaky-bucket",
  "libc",
