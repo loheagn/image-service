@@ -49,7 +49,7 @@ backend-localfs = []
 backend-oss = ["base64", "httpdate", "hmac-sha1-compact", "reqwest", "url"]
 backend-registry = ["base64", "reqwest", "url"]
 backend-s3 = ["base64", "hmac", "http", "reqwest", "sha2", "time", "url"]
-backend-local-http-proxy = ["hyper", "hyperlocal", "http"]
+backend-http-proxy = ["hyper", "hyperlocal", "http", "reqwest", "url"]
 
 [package.metadata.docs.rs]
 all-features = true

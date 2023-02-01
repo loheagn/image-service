@@ -239,7 +239,7 @@ pub struct BackendConfigV2 {
     /// Configuration for container registry backend.
     pub registry: Option<RegistryConfig>,
     /// Configuration for local http proxy.
-    pub local_http_proxy: Option<LocalHttpProxyConfig>,
+    pub http_proxy: Option<HttpProxyConfig>,
 }
 
 impl BackendConfigV2 {
@@ -279,6 +279,27 @@ impl BackendConfigV2 {
                 None => return false,
             },
 
+            "http_proxy" => match self.http_proxy.as_ref() {
+                Some(v) => {
+                    let is_valid_unix_socket_path = |path: &str| {
+                        let path = Path::new(path);
+                        path.is_absolute() && path.exists()
+                    };
+                    if v.addr.is_empty()
+                        || !(v.addr.starts_with("http://")
+                            || v.addr.starts_with("https://")
+                            || is_valid_unix_socket_path(&v.addr))
+                    {
+                        return false;
+                    }
+
+                    // check if v.path is valid url path format
+                    if Path::new(&v.path).join("any_blob_id").to_str().is_none() {
+                        return false;
+                    }
+                }
+                None => return false,
+            },
             _ => return false,
         }
 
@@ -329,14 +350,14 @@ impl BackendConfigV2 {
         }
     }
 
-    /// Get configuration information for local http proxy
-    pub fn get_local_http_proxy_config(&self) -> Result<&LocalHttpProxyConfig> {
-        if &self.backend_type != "local-http-proxy" {
-            Err(einval!("backend type is not 'local-http-proxy'"))
+    /// Get configuration information for http proxy
+    pub fn get_http_proxy_config(&self) -> Result<&HttpProxyConfig> {
+        if &self.backend_type != "http-proxy" {
+            Err(einval!("backend type is not 'http-proxy'"))
         } else {
-            self.local_http_proxy
+            self.http_proxy
                 .as_ref()
-                .ok_or_else(|| einval!("no configuration information for local-http-proxy"))
+                .ok_or_else(|| einval!("no configuration information for http-proxy"))
         }
     }
 }
@@ -441,12 +462,31 @@ pub struct S3Config {
     pub mirrors: Vec<MirrorConfig>,
 }
 
-/// ContentProxyProxy configuration information to access blobs.
+/// Http proxy configuration information to access blobs.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct LocalHttpProxyConfig {
-    pub socket_path: String,
-    #[serde(default = "default_local_http_proxy_thread_num")]
-    pub thread_num: usize,
+pub struct HttpProxyConfig {
+    /// Address of http proxy server, like `http://xxx.xxx` or `https://xxx.xxx` or `path/to/unix.sock`.
+    pub addr: String,
+    /// Path to access the blobs, like `/<_namespace>/<_repo>/blobs`.
+    pub path: String,
+    /// Skip SSL certificate validation for HTTPS scheme.
+    #[serde(default)]
+    pub skip_verify: bool,
+    /// Drop the read request once http request timeout, in seconds.
+    #[serde(default = "default_http_timeout")]
+    pub timeout: u32,
+    /// Drop the read request once http connection timeout, in seconds.
+    #[serde(default = "default_http_timeout")]
+    pub connect_timeout: u32,
+    /// Retry count when read request failed.
+    #[serde(default)]
+    pub retry_limit: u8,
+    /// Enable HTTP proxy for the read request.
+    #[serde(default)]
+    pub proxy: ProxyConfig,
+    /// Enable mirrors for the read request.
+    #[serde(default)]
+    pub mirrors: Vec<MirrorConfig>,
 }
 
 /// Container registry configuration information to access blobs.
@@ -900,10 +940,6 @@ fn default_rafs_mode() -> String {
     "direct".to_string()
 }
 
-fn default_local_http_proxy_thread_num() -> usize {
-    1
-}
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // For backward compatibility
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -930,7 +966,7 @@ impl TryFrom<&BackendConfig> for BackendConfigV2 {
             oss: None,
             s3: None,
             registry: None,
-            local_http_proxy: None,
+            http_proxy: None,
         };
 
         match value.backend_type.as_str() {
